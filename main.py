@@ -1,7 +1,7 @@
 import logging
 import asyncio
 import random
-from datetime import datetime
+from datetime import datetime, timedelta
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -14,7 +14,7 @@ import torch
 import torch.nn as nn
 import os
 
-# Logging
+# Configuração de logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ class AdvancedLSTMNet(nn.Module):
 
 model = AdvancedLSTMNet()
 
-# Análise
+# Funções de análise
 def advanced_analysis(df):
     df['support'] = df['close'].rolling(20).min()
     df['resistance'] = df['close'].rolling(20).max()
@@ -68,6 +68,7 @@ def prepare_input(df, time_step=60):
     input_data = data_scaled[-time_step:].reshape(1, time_step, 4)
     return torch.tensor(input_data, dtype=torch.float32), scaler
 
+# Lista de ativos para Quotex (exemplos OTC/day trade)
 ativos = ["EURUSD_otc", "GBPUSD_otc", "USDJPY_otc", "BTCUSD", "ETHUSD"]
 
 async def enviar_sinal(context: ContextTypes.DEFAULT_TYPE):
@@ -78,25 +79,19 @@ async def enviar_sinal(context: ContextTypes.DEFAULT_TYPE):
 
     logger.info(f"Iniciando sinal às {now.strftime('%H:%M')} - Período: {periodo}")
 
+    # Quotex client
     try:
         email = os.getenv('QUOTEX_EMAIL')
         password = os.getenv('QUOTEX_PASSWORD')
         logger.info(f"Tentando login com email: {email}")
         client = Quotex(email=email, password=password)
-        client.debug_ws_enable = True
+        client.debug_ws_enable = True  # Ativa logs detalhados do WebSocket
         client.debug = True
         logger.info("Debug: Iniciando connect")
-client.debug_ws_enable = True
-client.debug = True
-logger.info(f"Email usado: {email}")
-try:
-    await client.connect()
-except Exception as e:
-    logger.error(f"Detalhes do erro no connect: {str(e)}", exc_info=True)
         await client.connect()
         logger.info("Conectado à Quotex com sucesso")
     except Exception as e:
-        logger.error(f"Erro ao conectar Quotex: {e}")
+        logger.error(f"Detalhes do erro no connect: {str(e)}", exc_info=True)
         direcao = "CALL"  # Fallback
         cor = "🟢"
         ativo = "EURUSD_otc"
@@ -121,86 +116,4 @@ except Exception as e:
     ativo = random.choice(ativos)
 
     try:
-        candles = await client.get_candle(ativo, 60)  # M1
-        df = pd.DataFrame(candles)
-        df['close'] = pd.to_numeric(df['close'])
-        df['volume'] = pd.to_numeric(df['volume'])
-
-        input_tensor, scaler = prepare_input(df)
-        if input_tensor is not None:
-            with torch.no_grad():
-                pred = model(input_tensor).item()
-            is_call = pred > 0.5
-            direcao = "CALL" if is_call else "PUT"
-            cor = "🟢" if is_call else "🔴"
-            logger.info(f"Previsão real: {direcao}")
-        else:
-            direcao = "CALL"
-            cor = "🟢"
-    except Exception as e:
-        logger.error(f"Erro ao fetch candles: {e}")
-        direcao = "CALL"
-        cor = "🟢"
-
-    time_str = now.strftime("%H:%M")
-
-    mensagem = f"""
-🟡OPORTUNIDADE ENCONTRADA🟡
-
-💹{ativo}
-⏰{time_str}
-⌛M1
-{cor}Direção: {direcao}
-⚠️G1 (Opcional)
-
-📍Abra Sua Conta Aqui ↙️
-🔗https://binolla.com/?lid=2101
-
-🎯SINAIS AO VIVO🎯
-"""
-
-    await context.bot.send_message(
-        chat_id=1158936585,
-        text=mensagem,
-        parse_mode="HTML"
-    )
-
-    # Agendar verificação
-    scheduler = context.job_queue
-    scheduler.run_once(
-        verificar_resultado,
-        when=60,
-        data={"periodo": periodo, "is_call": is_call if 'is_call' in locals() else True, "ativo": ativo}
-    )
-
-async def verificar_resultado(context: ContextTypes.DEFAULT_TYPE):
-    periodo = context.job.data["periodo"]
-    ganhou = random.choice([True, False])  # Substitua por check real quando lib permitir
-    if ganhou:
-        stats[periodo]["gains"] += 1
-    else:
-        stats[periodo]["losses"] += 1
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Bot iniciado com sinais reais via Quotex! Sinais a cada minuto.")
-
-def main():
-    TOKEN = "8501561041:AAHucMrzlYnA0ZXR-1_HrOJ1widA6Qs4Ctw"
-
-    app = ApplicationBuilder().token(TOKEN).build()
-
-    app.add_handler(CommandHandler("start", start))
-
-    scheduler = AsyncIOScheduler()
-    scheduler.add_job(
-        enviar_sinal,
-        trigger=IntervalTrigger(minutes=1),
-        args=(app,)
-    )
-    scheduler.start()
-
-    print("Bot iniciado com sinais reais Quotex!")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
-
-if __name__ == "__main__":
-    main()
+        candles = await client.get_candle(ativo,
