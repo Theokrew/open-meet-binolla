@@ -4,8 +4,8 @@ pandas
 numpy
 requests
 scikit-learn
+git+https://github.com/ericpedra/pocketoption-api.git
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch
 torchvision
 torchaudio
-pocketoption-api  # Ou git+https://github.com/ericpedra/pocketoption-api.git (verifique repo atualizado)
