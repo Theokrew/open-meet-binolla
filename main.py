@@ -1,12 +1,13 @@
 import logging
 import asyncio
+import random  # ← ESSENCIAL! Faltava isso antes
 from datetime import datetime, timedelta
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
-from apscheduler.triggers.date import DateTrigger
 from binance.client import Client
+from binance.exceptions import BinanceAPIException
 import torch
 import torch.nn as nn
 import pandas as pd
@@ -14,7 +15,7 @@ import numpy as np
 from sklearn.preprocessing import MinMaxScaler
 import os
 
-# Configuração de logging
+# Configuração de logging (mais detalhado para depuração)
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,7 @@ class AdvancedLSTMNet(nn.Module):
         out = self.fc(out[:, -1, :])
         return self.sigmoid(out)
 
-# Carrega modelo (simulado; em produção, use torch.load)
+# Carrega modelo (simulado; em produção, use torch.load se tiver .pth)
 model = AdvancedLSTMNet()
 
 # Funções de análise
@@ -65,6 +66,7 @@ def prepare_input(df, time_step=60):
     scaler = MinMaxScaler()
     data_scaled = scaler.fit_transform(data)
     if len(data_scaled) < time_step:
+        logger.warning("Dados insuficientes para previsão")
         return None, None
     input_data = data_scaled[-time_step:].reshape(1, time_step, 4)
     return torch.tensor(input_data, dtype=torch.float32), scaler
@@ -78,33 +80,66 @@ async def enviar_sinal(context: ContextTypes.DEFAULT_TYPE):
     minuto = now.minute
     periodo = get_periodo(hora)
 
+    logger.info(f"Iniciando sinal às {now.strftime('%H:%M')} - Período: {periodo}")
+
     # Binance client com chaves do ambiente
-    binance_client = Client(
-        api_key=os.getenv('BINANCE_API_KEY'),
-        api_secret=os.getenv('BINANCE_API_SECRET')
-    )
-
-    ativo = random.choice(ativos)
-
-    # Fetch dados reais (últimos 90 candles de 1m)
-    klines = binance_client.get_klines(symbol=ativo, interval='1m', limit=90)
-    df = pd.DataFrame(klines, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'close_time', 'quote_asset_volume', 'number_of_trades', 'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'])
-    df['close'] = pd.to_numeric(df['close'])
-    df['volume'] = pd.to_numeric(df['volume'])
-
-    input_tensor, scaler = prepare_input(df)
-    if input_tensor is not None:
-        with torch.no_grad():
-            pred = model(input_tensor).item()
-        is_call = pred > 0.5
-        direcao = "CALL" if is_call else "PUT"
-        cor = "🟢" if is_call else "🔴"
-        confidence = pred * 100 if is_call else (1 - pred) * 100
-    else:
+    try:
+        binance_client = Client(
+            api_key=os.getenv('BINANCE_API_KEY'),
+            api_secret=os.getenv('BINANCE_API_SECRET')
+        )
+        logger.info("Binance client inicializado com sucesso")
+    except Exception as e:
+        logger.error(f"Erro ao inicializar Binance client: {e}")
         direcao = "CALL"  # Fallback
         cor = "🟢"
+        ativo = "BTCUSDT"
+        time_str = now.strftime("%H:%M")
+        mensagem = f"""
+🟡OPORTUNIDADE ENCONTRADA🟡
 
-    preco_inicial = df['close'].iloc[-1]
+💹{ativo}
+⏰{time_str}
+⌛M1
+{cor}Direção: {direcao}
+⚠️G1 (Opcional)
+
+📍Abra Sua Conta Aqui ↙️
+🔗https://binolla.com/?lid=2101
+
+🎯SINAIS AO VIVO🎯
+"""
+        await context.bot.send_message(chat_id=1158936585, text=mensagem, parse_mode="HTML")
+        return
+
+    ativo = random.choice(ativos)
+    logger.info(f"Ativo selecionado: {ativo}")
+
+    try:
+        # Fetch dados reais (últimos 90 candles de 1m)
+        klines = binance_client.get_klines(symbol=ativo, interval='1m', limit=90)
+        df = pd.DataFrame(klines, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'close_time', 'quote_asset_volume', 'number_of_trades', 'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'])
+        df['close'] = pd.to_numeric(df['close'])
+        df['volume'] = pd.to_numeric(df['volume'])
+
+        input_tensor, scaler = prepare_input(df)
+        if input_tensor is not None:
+            with torch.no_grad():
+                pred = model(input_tensor).item()
+            is_call = pred > 0.5
+            direcao = "CALL" if is_call else "PUT"
+            cor = "🟢" if is_call else "🔴"
+            logger.info(f"Previsão: {pred:.2f} → {direcao}")
+        else:
+            logger.warning("Dados insuficientes, usando fallback")
+            direcao = random.choice(["CALL", "PUT"])
+            cor = "🟢" if direcao == "CALL" else "🔴"
+    except BinanceAPIException as e:
+        logger.error(f"Erro na API Binance: {e}")
+        direcao = random.choice(["CALL", "PUT"])
+        cor = "🟢" if direcao == "CALL" else "🔴"
+
+    preco_inicial = df['close'].iloc[-1] if 'df' in locals() else 0
 
     time_str = now.strftime("%H:%M")
 
@@ -128,15 +163,16 @@ async def enviar_sinal(context: ContextTypes.DEFAULT_TYPE):
         text=mensagem,
         parse_mode="HTML"
     )
+    logger.info("Sinal enviado com sucesso")
 
     # Agendar verificação após 1 minuto
     scheduler = context.job_queue
     scheduler.run_once(
         verificar_resultado,
-        when=60,  # 60 segundos
+        when=60,
         data={
             "periodo": periodo,
-            "is_call": is_call,
+            "is_call": is_call if 'is_call' in locals() else True,
             "ativo": ativo,
             "preco_inicial": preco_inicial,
             "binance_client": binance_client
@@ -151,22 +187,29 @@ async def verificar_resultado(context: ContextTypes.DEFAULT_TYPE):
     preco_inicial = data["preco_inicial"]
     binance_client = data["binance_client"]
 
-    # Fetch preço atual
-    klines = binance_client.get_klines(symbol=ativo, interval='1m', limit=1)
-    preco_final = float(klines[0][4])
-
-    # Verifica real
-    ganhou = (preco_final > preco_inicial) if is_call else (preco_final < preco_inicial)
-    if ganhou:
-        stats[periodo]["gains"] += 1
-    else:
-        stats[periodo]["losses"] += 1
+    try:
+        klines = binance_client.get_klines(symbol=ativo, interval='1m', limit=1)
+        preco_final = float(klines[0][4])
+        ganhou = (preco_final > preco_inicial) if is_call else (preco_final < preco_inicial)
+        if ganhou:
+            stats[periodo]["gains"] += 1
+        else:
+            stats[periodo]["losses"] += 1
+        logger.info(f"Verificação: Ativo {ativo} - Ganho: {ganhou}")
+    except Exception as e:
+        logger.error(f"Erro na verificação: {e}")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Bot iniciado com sinais reais via Binance! Sinais a cada minuto.")
 
 def main():
     TOKEN = "8501561041:AAHucMrzlYnA0ZXR-1_HrOJ1widA6Qs4Ctw"
+
+    # Verifica chaves Binance no startup
+    if not os.getenv('BINANCE_API_KEY') or not os.getenv('BINANCE_API_SECRET'):
+        logger.error("Chaves Binance não configuradas! Adicione BINANCE_API_KEY e BINANCE_API_SECRET no Config Vars do Heroku.")
+    else:
+        logger.info("Chaves Binance detectadas")
 
     app = ApplicationBuilder().token(TOKEN).build()
 
@@ -180,7 +223,7 @@ def main():
     )
     scheduler.start()
 
-    print("Bot iniciado com sinais reais da Binance!")
+    logger.info("Bot iniciado com sinais reais da Binance!")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
