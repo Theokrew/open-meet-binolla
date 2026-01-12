@@ -4,6 +4,7 @@ pandas
 numpy
 requests
 python-binance
+scikit-learn
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch
 torchvision
