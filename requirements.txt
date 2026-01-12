@@ -4,7 +4,7 @@ pandas
 numpy
 requests
 scikit-learn
-git+https://github.com/cleitonleonel/pyquotex.git
+git+https://github.com/cleitonleonel/pyquotex.git@master
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch
 torchvision
