@@ -83,14 +83,15 @@ async def enviar_sinal(context: ContextTypes.DEFAULT_TYPE):
     try:
         email = os.getenv('QUOTEX_EMAIL')
         password = os.getenv('QUOTEX_PASSWORD')
-        client = Quotex(email=email, password=password, lang="pt")
+        logger.info(f"Tentando login com email: {email}")
+        client = Quotex(email=email, password=password)
         client.debug_ws_enable = True  # Ativa logs detalhados do WebSocket
         client.debug = True
         await client.connect()
         logger.info("Conectado à Quotex com sucesso")
     except Exception as e:
         logger.error(f"Erro ao conectar Quotex: {e}")
-        direcao = "CALL"
+        direcao = "CALL"  # Fallback
         cor = "🟢"
         ativo = "EURUSD_otc"
         time_str = now.strftime("%H:%M")
@@ -104,14 +105,14 @@ async def enviar_sinal(context: ContextTypes.DEFAULT_TYPE):
 ⚠️G1 (Opcional)
 
 📍Abra Sua Conta Aqui ↙️
-🔗https://binolla.com/?lid=2101  # Mantenha ou mude para link Quotex afiliado
+🔗https://binolla.com/?lid=2101
 
 🎯SINAIS AO VIVO🎯
 """
         await context.bot.send_message(chat_id=1158936585, text=mensagem, parse_mode="HTML")
         return
 
-    ativo = random.choice(ativos)  # Expanda para ativos reais do cliente
+    ativo = random.choice(ativos)
 
     # Fetch candles reais (exemplo com pyquotex - ajuste conforme doc da lib)
     try:
@@ -159,10 +160,14 @@ async def enviar_sinal(context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML"
     )
 
-    # Agendar verificação (ajuste para Quotex check_win)
+    # Agendar verificação após 1 minuto
     scheduler = context.job_queue
-    scheduler.run_once(verificar_resultado, 60, data={"periodo": periodo, "is_call": is_call if 'is_call' in locals() else True, "ativo": ativo})
-
+    scheduler.run_once(
+        verificar_resultado,
+        when=60,
+        data={"periodo": periodo, "is_call": is_call if 'is_call' in locals() else True, "ativo": ativo}
+    )
+    
 async def verificar_resultado(context: ContextTypes.DEFAULT_TYPE):
     # Implemente check real com pyquotex (ex: client.check_win)
     # Por agora, simulação
