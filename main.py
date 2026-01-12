@@ -85,6 +85,14 @@ async def enviar_sinal(context: ContextTypes.DEFAULT_TYPE):
         client = Quotex(email=email, password=password)
         client.debug_ws_enable = True
         client.debug = True
+        logger.info("Debug: Iniciando connect")
+client.debug_ws_enable = True
+client.debug = True
+logger.info(f"Email usado: {email}")
+try:
+    await client.connect()
+except Exception as e:
+    logger.error(f"Detalhes do erro no connect: {str(e)}", exc_info=True)
         await client.connect()
         logger.info("Conectado à Quotex com sucesso")
     except Exception as e:
