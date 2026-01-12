@@ -6,7 +6,8 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
-from pyquotex.stable_api import Quotex
+# Substitua pela lib correta de Pocket Option
+from pocketoption_api import PocketOption  # Ajuste o import conforme a lib que usar
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler
@@ -33,7 +34,7 @@ def get_periodo(hora: int) -> str:
     else:
         return "noite"
 
-# Modelo LSTM
+# Modelo LSTM (simples)
 class AdvancedLSTMNet(nn.Module):
     def __init__(self):
         super().__init__()
@@ -79,17 +80,15 @@ async def enviar_sinal(context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Iniciando sinal às {now.strftime('%H:%M')} - Período: {periodo}")
 
     try:
-        email = os.getenv('QUOTEX_EMAIL')
-        password = os.getenv('QUOTEX_PASSWORD')
+        email = os.getenv('PO_EMAIL')
+        password = os.getenv('PO_PASSWORD')
         logger.info(f"Tentando login com email: {email}")
-        client = Quotex(email=email, password=password)
-        client.debug_ws_enable = True
+        client = PocketOption(email=email, password=password)
         client.debug = True
-        logger.info("Debug: Iniciando connect")
         await client.connect()
-        logger.info("Conectado à Quotex com sucesso")
+        logger.info("Conectado à Pocket Option com sucesso")
     except Exception as e:
-        logger.error(f"Detalhes do erro no connect: {str(e)}", exc_info=True)
+        logger.error(f"Erro ao conectar Pocket Option: {e}", exc_info=True)
         direcao = "CALL"  # Fallback
         cor = "🟢"
         ativo = "EURUSD_otc"
@@ -114,7 +113,7 @@ async def enviar_sinal(context: ContextTypes.DEFAULT_TYPE):
     ativo = random.choice(ativos)
 
     try:
-        candles = await client.get_candle(ativo, 60)  # M1
+        candles = await client.get_candles(ativo, 60)  # Ajuste conforme a lib
         df = pd.DataFrame(candles)
         df['close'] = pd.to_numeric(df['close'])
         df['volume'] = pd.to_numeric(df['volume'])
@@ -167,14 +166,14 @@ async def enviar_sinal(context: ContextTypes.DEFAULT_TYPE):
 
 async def verificar_resultado(context: ContextTypes.DEFAULT_TYPE):
     periodo = context.job.data["periodo"]
-    ganhou = random.choice([True, False])  # Placeholder
+    ganhou = random.choice([True, False])  # Placeholder - ajuste para check real
     if ganhou:
         stats[periodo]["gains"] += 1
     else:
         stats[periodo]["losses"] += 1
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Bot iniciado com sinais reais via Quotex! Sinais a cada minuto.")
+    await update.message.reply_text("Bot iniciado com sinais reais via Pocket Option! Sinais a cada minuto.")
 
 def main():
     TOKEN = "8501561041:AAHucMrzlYnA0ZXR-1_HrOJ1widA6Qs4Ctw"
@@ -191,7 +190,7 @@ def main():
     )
     scheduler.start()
 
-    print("Bot iniciado com sinais reais Quotex!")
+    print("Bot iniciado com sinais reais Pocket Option!")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
