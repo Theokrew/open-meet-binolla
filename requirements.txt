@@ -3,9 +3,6 @@ apscheduler==3.10.4
 pandas
 numpy
 requests
-python-binance
+pyquotex
 scikit-learn
---extra-index-url https://download.pytorch.org/whl/cpu
-torch
-torchvision
-torchaudio
+torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
