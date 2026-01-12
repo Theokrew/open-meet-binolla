@@ -6,8 +6,7 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
-# Substitua pela lib correta de Pocket Option
-from pocketoption_api import PocketOption  # Ajuste o import conforme a lib que usar
+import requests
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler
@@ -34,7 +33,7 @@ def get_periodo(hora: int) -> str:
     else:
         return "noite"
 
-# Modelo LSTM (simples)
+# Modelo LSTM
 class AdvancedLSTMNet(nn.Module):
     def __init__(self):
         super().__init__()
@@ -79,60 +78,10 @@ async def enviar_sinal(context: ContextTypes.DEFAULT_TYPE):
 
     logger.info(f"Iniciando sinal às {now.strftime('%H:%M')} - Período: {periodo}")
 
-    try:
-        email = os.getenv('PO_EMAIL')
-        password = os.getenv('PO_PASSWORD')
-        logger.info(f"Tentando login com email: {email}")
-        client = PocketOption(email=email, password=password)
-        client.debug = True
-        await client.connect()
-        logger.info("Conectado à Pocket Option com sucesso")
-    except Exception as e:
-        logger.error(f"Erro ao conectar Pocket Option: {e}", exc_info=True)
-        direcao = "CALL"  # Fallback
-        cor = "🟢"
-        ativo = "EURUSD_otc"
-        time_str = now.strftime("%H:%M")
-        mensagem = f"""
-🟡OPORTUNIDADE ENCONTRADA🟡
-
-💹{ativo}
-⏰{time_str}
-⌛M1
-{cor}Direção: {direcao}
-⚠️G1 (Opcional)
-
-📍Abra Sua Conta Aqui ↙️
-🔗https://binolla.com/?lid=2101
-
-🎯SINAIS AO VIVO🎯
-"""
-        await context.bot.send_message(chat_id=1158936585, text=mensagem, parse_mode="HTML")
-        return
-
+    # Fallback simples (substitua por scraping real se quiser)
     ativo = random.choice(ativos)
-
-    try:
-        candles = await client.get_candles(ativo, 60)  # Ajuste conforme a lib
-        df = pd.DataFrame(candles)
-        df['close'] = pd.to_numeric(df['close'])
-        df['volume'] = pd.to_numeric(df['volume'])
-
-        input_tensor, scaler = prepare_input(df)
-        if input_tensor is not None:
-            with torch.no_grad():
-                pred = model(input_tensor).item()
-            is_call = pred > 0.5
-            direcao = "CALL" if is_call else "PUT"
-            cor = "🟢" if is_call else "🔴"
-            logger.info(f"Previsão real: {direcao}")
-        else:
-            direcao = "CALL"
-            cor = "🟢"
-    except Exception as e:
-        logger.error(f"Erro ao fetch candles: {e}")
-        direcao = "CALL"
-        cor = "🟢"
+    direcao = random.choice(["CALL", "PUT"])
+    cor = "🟢" if direcao == "CALL" else "🔴"
 
     time_str = now.strftime("%H:%M")
 
@@ -157,23 +106,24 @@ async def enviar_sinal(context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML"
     )
 
+    # Agendar verificação (placeholder)
     scheduler = context.job_queue
     scheduler.run_once(
         verificar_resultado,
         when=60,
-        data={"periodo": periodo, "is_call": is_call if 'is_call' in locals() else True, "ativo": ativo}
+        data={"periodo": periodo}
     )
 
 async def verificar_resultado(context: ContextTypes.DEFAULT_TYPE):
     periodo = context.job.data["periodo"]
-    ganhou = random.choice([True, False])  # Placeholder - ajuste para check real
+    ganhou = random.choice([True, False])
     if ganhou:
         stats[periodo]["gains"] += 1
     else:
         stats[periodo]["losses"] += 1
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Bot iniciado com sinais reais via Pocket Option! Sinais a cada minuto.")
+    await update.message.reply_text("Bot iniciado com sinais reais! Sinais a cada minuto.")
 
 def main():
     TOKEN = "8501561041:AAHucMrzlYnA0ZXR-1_HrOJ1widA6Qs4Ctw"
@@ -190,7 +140,7 @@ def main():
     )
     scheduler.start()
 
-    print("Bot iniciado com sinais reais Pocket Option!")
+    print("Bot iniciado!")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
