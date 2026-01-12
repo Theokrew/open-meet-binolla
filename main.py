@@ -1,12 +1,12 @@
 import logging
 import asyncio
 import random
-from datetime import datetime, timedelta
+from datetime import datetime
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
-from pyquotex.stable_api import Quotex  # Biblioteca unofficial para Quotex
+from pyquotex.stable_api import Quotex
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler
@@ -14,7 +14,7 @@ import torch
 import torch.nn as nn
 import os
 
-# Configuração de logging
+# Logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ def get_periodo(hora: int) -> str:
     else:
         return "noite"
 
-# Modelo LSTM (simples, pode treinar depois)
+# Modelo LSTM (simples)
 class AdvancedLSTMNet(nn.Module):
     def __init__(self):
         super().__init__()
@@ -50,7 +50,7 @@ class AdvancedLSTMNet(nn.Module):
 
 model = AdvancedLSTMNet()
 
-# Funções de análise
+# Análise
 def advanced_analysis(df):
     df['support'] = df['close'].rolling(20).min()
     df['resistance'] = df['close'].rolling(20).max()
@@ -68,7 +68,6 @@ def prepare_input(df, time_step=60):
     input_data = data_scaled[-time_step:].reshape(1, time_step, 4)
     return torch.tensor(input_data, dtype=torch.float32), scaler
 
-# Lista de ativos para Quotex (exemplos OTC/day trade)
 ativos = ["EURUSD_otc", "GBPUSD_otc", "USDJPY_otc", "BTCUSD", "ETHUSD"]
 
 async def enviar_sinal(context: ContextTypes.DEFAULT_TYPE):
@@ -79,13 +78,12 @@ async def enviar_sinal(context: ContextTypes.DEFAULT_TYPE):
 
     logger.info(f"Iniciando sinal às {now.strftime('%H:%M')} - Período: {periodo}")
 
-    # Quotex client (use email/senha do cliente - armazene em Config Vars do Heroku)
     try:
         email = os.getenv('QUOTEX_EMAIL')
         password = os.getenv('QUOTEX_PASSWORD')
         logger.info(f"Tentando login com email: {email}")
         client = Quotex(email=email, password=password)
-        client.debug_ws_enable = True  # Ativa logs detalhados do WebSocket
+        client.debug_ws_enable = True
         client.debug = True
         await client.connect()
         logger.info("Conectado à Quotex com sucesso")
@@ -114,9 +112,8 @@ async def enviar_sinal(context: ContextTypes.DEFAULT_TYPE):
 
     ativo = random.choice(ativos)
 
-    # Fetch candles reais (exemplo com pyquotex - ajuste conforme doc da lib)
     try:
-        candles = await client.get_candle(ativo, 60)  # 60 segundos = M1
+        candles = await client.get_candle(ativo, 60)  # M1
         df = pd.DataFrame(candles)
         df['close'] = pd.to_numeric(df['close'])
         df['volume'] = pd.to_numeric(df['volume'])
@@ -160,19 +157,17 @@ async def enviar_sinal(context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML"
     )
 
-    # Agendar verificação após 1 minuto
+    # Agendar verificação
     scheduler = context.job_queue
     scheduler.run_once(
         verificar_resultado,
         when=60,
         data={"periodo": periodo, "is_call": is_call if 'is_call' in locals() else True, "ativo": ativo}
     )
-    
+
 async def verificar_resultado(context: ContextTypes.DEFAULT_TYPE):
-    # Implemente check real com pyquotex (ex: client.check_win)
-    # Por agora, simulação
     periodo = context.job.data["periodo"]
-    ganhou = random.choice([True, False])
+    ganhou = random.choice([True, False])  # Substitua por check real quando lib permitir
     if ganhou:
         stats[periodo]["gains"] += 1
     else:
