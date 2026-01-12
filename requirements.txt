@@ -4,7 +4,7 @@ pandas
 numpy
 requests
 scikit-learn
-git+https://github.com/ChipaDevTeam/PocketOptionAPI.git@master
+git+https://github.com/ChipaDevTeam/PocketOptionAPI.git@main
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch
 torchvision
