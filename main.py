@@ -84,6 +84,8 @@ async def enviar_sinal(context: ContextTypes.DEFAULT_TYPE):
         email = os.getenv('QUOTEX_EMAIL')
         password = os.getenv('QUOTEX_PASSWORD')
         client = Quotex(email=email, password=password, lang="pt")
+        client.debug_ws_enable = True  # Ativa logs detalhados do WebSocket
+        client.debug = True
         await client.connect()
         logger.info("Conectado à Quotex com sucesso")
     except Exception as e:
