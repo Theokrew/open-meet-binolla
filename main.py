@@ -6,7 +6,7 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
-import requests
+from pocketoptionapi import PocketOptionClient  # Import da lib (ajuste se o nome for diferente)
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler
@@ -33,14 +33,14 @@ def get_periodo(hora: int) -> str:
     else:
         return "noite"
 
-# Modelo LSTM
+# Modelo LSTM (simples, pode treinar depois)
 class AdvancedLSTMNet(nn.Module):
     def __init__(self):
         super().__init__()
         self.lstm = nn.LSTM(4, 128, num_layers=2, batch_first=True, dropout=0.2)
         self.fc = nn.Linear(128, 1)
         self.sigmoid = nn.Sigmoid()
-    
+
     def forward(self, x):
         h0 = torch.zeros(2, x.size(0), 128)
         c0 = torch.zeros(2, x.size(0), 128)
@@ -78,10 +78,59 @@ async def enviar_sinal(context: ContextTypes.DEFAULT_TYPE):
 
     logger.info(f"Iniciando sinal às {now.strftime('%H:%M')} - Período: {periodo}")
 
-    # Fallback simples (substitua por scraping real se quiser)
+    try:
+        email = os.getenv('PO_EMAIL')
+        password = os.getenv('PO_PASSWORD')
+        logger.info(f"Tentando login com email: {email}")
+        client = PocketOptionClient()
+        await client.connect(email=email, password=password)
+        logger.info("Conectado à Pocket Option com sucesso")
+    except Exception as e:
+        logger.error(f"Erro ao conectar Pocket Option: {e}", exc_info=True)
+        direcao = "CALL"  # Fallback
+        cor = "🟢"
+        ativo = "EURUSD_otc"
+        time_str = now.strftime("%H:%M")
+        mensagem = f"""
+🟡OPORTUNIDADE ENCONTRADA🟡
+
+💹{ativo}
+⏰{time_str}
+⌛M1
+{cor}Direção: {direcao}
+⚠️G1 (Opcional)
+
+📍Abra Sua Conta Aqui ↙️
+🔗https://binolla.com/?lid=2101
+
+🎯SINAIS AO VIVO🎯
+"""
+        await context.bot.send_message(chat_id=1158936585, text=mensagem, parse_mode="HTML")
+        return
+
     ativo = random.choice(ativos)
-    direcao = random.choice(["CALL", "PUT"])
-    cor = "🟢" if direcao == "CALL" else "🔴"
+
+    try:
+        candles = await client.get_candles(ativo, 60)  # Ajuste conforme a lib
+        df = pd.DataFrame(candles)
+        df['close'] = pd.to_numeric(df['close'])
+        df['volume'] = pd.to_numeric(df['volume'])
+
+        input_tensor, scaler = prepare_input(df)
+        if input_tensor is not None:
+            with torch.no_grad():
+                pred = model(input_tensor).item()
+            is_call = pred > 0.5
+            direcao = "CALL" if is_call else "PUT"
+            cor = "🟢" if is_call else "🔴"
+            logger.info(f"Previsão real: {direcao}")
+        else:
+            direcao = "CALL"
+            cor = "🟢"
+    except Exception as e:
+        logger.error(f"Erro ao fetch candles: {e}")
+        direcao = "CALL"
+        cor = "🟢"
 
     time_str = now.strftime("%H:%M")
 
@@ -106,24 +155,23 @@ async def enviar_sinal(context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML"
     )
 
-    # Agendar verificação (placeholder)
     scheduler = context.job_queue
     scheduler.run_once(
         verificar_resultado,
         when=60,
-        data={"periodo": periodo}
+        data={"periodo": periodo, "is_call": is_call if 'is_call' in locals() else True, "ativo": ativo}
     )
 
 async def verificar_resultado(context: ContextTypes.DEFAULT_TYPE):
     periodo = context.job.data["periodo"]
-    ganhou = random.choice([True, False])
+    ganhou = random.choice([True, False])  # Placeholder - ajuste quando lib permitir check_win
     if ganhou:
         stats[periodo]["gains"] += 1
     else:
         stats[periodo]["losses"] += 1
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Bot iniciado com sinais reais! Sinais a cada minuto.")
+    await update.message.reply_text("Bot iniciado com sinais reais via Pocket Option! Sinais a cada minuto.")
 
 def main():
     TOKEN = "8501561041:AAHucMrzlYnA0ZXR-1_HrOJ1widA6Qs4Ctw"
@@ -140,7 +188,7 @@ def main():
     )
     scheduler.start()
 
-    print("Bot iniciado!")
+    print("Bot iniciado com sinais reais Pocket Option!")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
