@@ -4,7 +4,6 @@ pandas
 numpy
 requests
 scikit-learn
-git+https://github.com/ericpedra/pocketoption-api.git
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch
 torchvision
