@@ -1,195 +1,147 @@
+import os
 import logging
 import asyncio
-import random
+import re
 from datetime import datetime
+
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.interval import IntervalTrigger
-from pocketoptionapi import PocketOptionClient  # Import da lib (ajuste se o nome for diferente)
-import pandas as pd
-import numpy as np
-from sklearn.preprocessing import MinMaxScaler
-import torch
-import torch.nn as nn
-import os
+
+from telethon import TelegramClient, events
 
 # Logging
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
+)
 logger = logging.getLogger(__name__)
 
-# Estatísticas
-stats = {
-    "manha": {"gains": 0, "losses": 0},
-    "tarde": {"gains": 0, "losses": 0},
-    "noite": {"gains": 0, "losses": 0}
-}
+# Configurações (Heroku Environment Variables)
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+API_ID = int(os.getenv("API_ID"))
+API_HASH = os.getenv("API_HASH")
+SOURCE_CHAT_ID = int(os.getenv("SOURCE_CHAT_ID"))  # ID do canal Pocket Signal
+TARGET_CHAT_ID = int(os.getenv("TARGET_CHAT_ID"))  # ID do seu canal/grupo/chat
 
-def get_periodo(hora: int) -> str:
-    if 6 <= hora < 12:
-        return "manha"
-    elif 12 <= hora < 18:
-        return "tarde"
-    else:
-        return "noite"
+LINK_BINOLLA = "https://binolla.com/?lid=2101"
 
-# Modelo LSTM (simples, pode treinar depois)
-class AdvancedLSTMNet(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.lstm = nn.LSTM(4, 128, num_layers=2, batch_first=True, dropout=0.2)
-        self.fc = nn.Linear(128, 1)
-        self.sigmoid = nn.Sigmoid()
+# Telegram Bot App (para enviar)
+telegram_app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    def forward(self, x):
-        h0 = torch.zeros(2, x.size(0), 128)
-        c0 = torch.zeros(2, x.size(0), 128)
-        out, _ = self.lstm(x, (h0, c0))
-        out = self.fc(out[:, -1, :])
-        return self.sigmoid(out)
+# Telethon Client (conta de usuário para escutar)
+telethon_client = TelegramClient("forwarder_session", API_ID, API_HASH)
 
-model = AdvancedLSTMNet()
 
-# Análise
-def advanced_analysis(df):
-    df['support'] = df['close'].rolling(20).min()
-    df['resistance'] = df['close'].rolling(20).max()
-    df['volatility'] = df['close'].pct_change().rolling(14).std()
-    df['momentum'] = df['close'] - df['close'].shift(10)
-    return df.fillna(0)
+def parse_signal(text: str):
+    """Extrai ativo, expiração e direção do texto do sinal."""
+    # Asset
+    m_asset = re.search(r"Asset:s*#?([A-Z0-9_]+)", text, re.IGNORECASE)
+    ativo = m_asset.group(1) if m_asset else "ATIVO_DESCONHECIDO"
+    
+    # Expiration
+    m_exp = re.search(r"Expiration:s*([A-Z0-9]+)", text, re.IGNORECASE)
+    expiracao = m_exp.group(1) if m_exp else "M1"
+    
+    # Direção (CALL/PUT) - ajustado para seu formato
+    m_dir = re.search(r"(CALL|PUT)", text, re.IGNORECASE)
+    direcao = m_dir.group(1).upper() if m_dir else "CALL"
+    
+    # Hora atual
+    hora = datetime.now().strftime("%H:%M")
+    
+    return ativo, expiracao, direcao, hora
 
-def prepare_input(df, time_step=60):
-    df = advanced_analysis(df)
-    data = df[['close', 'volume', 'volatility', 'momentum']].values
-    scaler = MinMaxScaler()
-    data_scaled = scaler.fit_transform(data)
-    if len(data_scaled) < time_step:
-        return None, None
-    input_data = data_scaled[-time_step:].reshape(1, time_step, 4)
-    return torch.tensor(input_data, dtype=torch.float32), scaler
 
-ativos = ["EURUSD_otc", "GBPUSD_otc", "USDJPY_otc", "BTCUSD", "ETHUSD"]
+async def send_to_target(ativo: str, expiracao: str, direcao: str, hora: str):
+    """Monta e envia mensagem no modelo exato que você pediu."""
+    cor = "🟢" if direcao == "CALL" else "🔴"
+    
+    mensagem = (
+        "🟡OPORTUNIDADE ENCONTRADA🟡
 
-async def enviar_sinal(context: ContextTypes.DEFAULT_TYPE):
-    now = datetime.now()
-    hora = now.hour
-    minuto = now.minute
-    periodo = get_periodo(hora)
+"
+        f"💹{ativo}
+"
+        f"⏰{hora}
+"
+        f"⌛{expiracao}
+"
+        f"{cor}Direção: {direcao}
+"
+        "⚠️G1 (Opcional)
 
-    logger.info(f"Iniciando sinal às {now.strftime('%H:%M')} - Período: {periodo}")
+"
+        "📍Abra Sua Conta Aqui ↙️
+"
+        f"<a href="{LINK_BINOLLA}">🔗GERENCIE SUA BANCA!!!</a>
 
+"
+        "🎯SINAIS AO VIVO🎯"
+    )
+    
     try:
-        email = os.getenv('PO_EMAIL')
-        password = os.getenv('PO_PASSWORD')
-        logger.info(f"Tentando login com email: {email}")
-        client = PocketOptionClient()
-        await client.connect(email=email, password=password)
-        logger.info("Conectado à Pocket Option com sucesso")
+        await telegram_app.bot.send_message(
+            chat_id=TARGET_CHAT_ID,
+            text=mensagem,
+            parse_mode="HTML"
+        )
+        logger.info(f"✅ Sinal enviado: {ativo} {direcao}")
     except Exception as e:
-        logger.error(f"Erro ao conectar Pocket Option: {e}", exc_info=True)
-        direcao = "CALL"  # Fallback
-        cor = "🟢"
-        ativo = "EURUSD_otc"
-        time_str = now.strftime("%H:%M")
-        mensagem = f"""
-🟡OPORTUNIDADE ENCONTRADA🟡
+        logger.error(f"❌ Erro ao enviar: {e}")
 
-💹{ativo}
-⏰{time_str}
-⌛M1
-{cor}Direção: {direcao}
-⚠️G1 (Opcional)
 
-📍Abra Sua Conta Aqui ↙️
-🔗https://binolla.com/?lid=2101
-
-🎯SINAIS AO VIVO🎯
-"""
-        await context.bot.send_message(chat_id=1158936585, text=mensagem, parse_mode="HTML")
+@telethon_client.on(events.NewMessage)
+async def signal_handler(event):
+    """Escuta sinais no canal de origem."""
+    chat = await event.get_chat()
+    chat_id = getattr(chat, "id", None)
+    
+    if chat_id != SOURCE_CHAT_ID:
         return
+    
+    text = event.message.message or ""
+    
+    # Só processa mensagens que parecem ser sinais
+    if "SIGNAL" not in text or "Asset:" not in text:
+        return
+    
+    logger.info(f"🔍 Sinal detectado no canal {SOURCE_CHAT_ID}")
+    
+    ativo, expiracao, direcao, hora = parse_signal(text)
+    await send_to_target(ativo, expiracao, direcao, hora)
 
-    ativo = random.choice(ativos)
 
-    try:
-        candles = await client.get_candles(ativo, 60)  # Ajuste conforme a lib
-        df = pd.DataFrame(candles)
-        df['close'] = pd.to_numeric(df['close'])
-        df['volume'] = pd.to_numeric(df['volume'])
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando /start básico."""
+    await update.message.reply_text(
+        f"🤖 Bot copiador de sinais ativo!
 
-        input_tensor, scaler = prepare_input(df)
-        if input_tensor is not None:
-            with torch.no_grad():
-                pred = model(input_tensor).item()
-            is_call = pred > 0.5
-            direcao = "CALL" if is_call else "PUT"
-            cor = "🟢" if is_call else "🔴"
-            logger.info(f"Previsão real: {direcao}")
-        else:
-            direcao = "CALL"
-            cor = "🟢"
-    except Exception as e:
-        logger.error(f"Erro ao fetch candles: {e}")
-        direcao = "CALL"
-        cor = "🟢"
+"
+        f"📡 Escutando: {SOURCE_CHAT_ID}
+"
+        f"📤 Enviando para: {TARGET_CHAT_ID}
 
-    time_str = now.strftime("%H:%M")
-
-    mensagem = f"""
-🟡OPORTUNIDADE ENCONTRADA🟡
-
-💹{ativo}
-⏰{time_str}
-⌛M1
-{cor}Direção: {direcao}
-⚠️G1 (Opcional)
-
-📍Abra Sua Conta Aqui ↙️
-🔗https://binolla.com/?lid=2101
-
-🎯SINAIS AO VIVO🎯
-"""
-
-    await context.bot.send_message(
-        chat_id=1158936585,
-        text=mensagem,
-        parse_mode="HTML"
+"
+        "Quando chegar sinal no canal de origem, replico aqui no formato solicitado."
     )
 
-    scheduler = context.job_queue
-    scheduler.run_once(
-        verificar_resultado,
-        when=60,
-        data={"periodo": periodo, "is_call": is_call if 'is_call' in locals() else True, "ativo": ativo}
+
+async def main():
+    """Inicia bot e client juntos."""
+    telegram_app.add_handler(CommandHandler("start", start_command))
+    
+    # Inicia Telethon
+    await telethon_client.start()
+    logger.info("✅ Telethon iniciado (user account)")
+    
+    logger.info("🚀 Bot copiador de sinais rodando!")
+    
+    # Roda tudo junto
+    await asyncio.gather(
+        telegram_app.run_polling(allowed_updates=Update.ALL_TYPES),
+        telethon_client.run_until_disconnected()
     )
 
-async def verificar_resultado(context: ContextTypes.DEFAULT_TYPE):
-    periodo = context.job.data["periodo"]
-    ganhou = random.choice([True, False])  # Placeholder - ajuste quando lib permitir check_win
-    if ganhou:
-        stats[periodo]["gains"] += 1
-    else:
-        stats[periodo]["losses"] += 1
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Bot iniciado com sinais reais via Pocket Option! Sinais a cada minuto.")
-
-def main():
-    TOKEN = "8501561041:AAHucMrzlYnA0ZXR-1_HrOJ1widA6Qs4Ctw"
-
-    app = ApplicationBuilder().token(TOKEN).build()
-
-    app.add_handler(CommandHandler("start", start))
-
-    scheduler = AsyncIOScheduler()
-    scheduler.add_job(
-        enviar_sinal,
-        trigger=IntervalTrigger(minutes=1),
-        args=(app,)
-    )
-    scheduler.start()
-
-    print("Bot iniciado com sinais reais Pocket Option!")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
